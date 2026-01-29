@@ -9,11 +9,9 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Perfect Freehand Demo',
+      title: 'Learning JP',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const DrawingPage(),
     );
   }
 }
-
-

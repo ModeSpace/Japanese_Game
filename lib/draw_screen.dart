@@ -12,9 +12,12 @@ class DrawingPage extends StatefulWidget {
 class _DrawingPageState extends State<DrawingPage> {
   final List<Offset> _points = [];
   Timer? _idleTimer;
+  bool _isPointerDown = false;
 
   void _resetIdleTimer() {
     _idleTimer?.cancel();
+    // Don't schedule clearing while the pointer is down (holding left click)
+    if (_isPointerDown) return;
     _idleTimer = Timer(const Duration(milliseconds: 750), () {
       if (mounted) {
         setState(() => _points.clear());
@@ -24,22 +27,33 @@ class _DrawingPageState extends State<DrawingPage> {
 
   void _onPanStart(DragStartDetails details) {
     setState(() {
+      _isPointerDown = true;
       _points.add(details.localPosition);
     });
-    _resetIdleTimer();
+    // Ensure any pending clear is canceled while user holds down
+    _idleTimer?.cancel();
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
     setState(() {
       _points.add(details.localPosition);
     });
-    _resetIdleTimer();
+    // Keep the timer canceled while pointer remains down
+    _idleTimer?.cancel();
   }
 
   void _onPanEnd(DragEndDetails details) {
     setState(() {
+      _isPointerDown = false;
       // break stroke with a null marker
       _points.add(Offset.zero);
+    });
+    _resetIdleTimer();
+  }
+
+  void _onPanCancel() {
+    setState(() {
+      _isPointerDown = false;
     });
     _resetIdleTimer();
   }
@@ -59,7 +73,7 @@ class _DrawingPageState extends State<DrawingPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Draw with perfect_freehand'),
+        title: const Text('Drawing Page'),
         actions: [
           IconButton(onPressed: _clear, icon: const Icon(Icons.delete)),
         ],
@@ -67,8 +81,7 @@ class _DrawingPageState extends State<DrawingPage> {
       body: GestureDetector(
         onPanStart: _onPanStart,
         onPanUpdate: _onPanUpdate,
-        onPanEnd: _onPanEnd,
-        child: CustomPaint(
+        onPanEnd: _onPanEnd,        onPanCancel: _onPanCancel,        child: CustomPaint(
           size: Size.infinite,
           painter: _FreehandPainter(List.of(_points)),
         ),
@@ -105,6 +118,11 @@ class _FreehandPainter extends CustomPainter {
     if (current.isNotEmpty) strokes.add(current);
 
     for (var stroke in strokes) {
+      // If the stroke contains a single point (tap without move), draw a dot
+      if (stroke.length == 1) {
+        canvas.drawCircle(stroke[0], 8.0, _paint);
+        continue;
+      }
       if (stroke.length < 2) continue;
 
       // Convert stroke to the format expected by `perfect_freehand`.
