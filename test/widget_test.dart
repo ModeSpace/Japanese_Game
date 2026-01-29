@@ -11,20 +11,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:game/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Drawing page loads', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify app bar title is present and no counter/FAB exist
+    expect(find.text('Draw with perfect_freehand'), findsOneWidget);
+    expect(find.byIcon(Icons.add), findsNothing);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify at least one drawing canvas (CustomPaint) exists
+    expect(find.byType(CustomPaint), findsWidgets);
   });
 }
