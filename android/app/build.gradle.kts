@@ -39,6 +39,11 @@ android {
     }
 }
 
+dependencies {
+    // To recognize Japanese script (this includes Latin support as well)
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+}
+
 flutter {
     source = "../.."
 }

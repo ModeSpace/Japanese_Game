@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_mlkit_digital_ink_recognition/google_mlkit_digital_ink_recognition.dart' as ml;
 import 'package:perfect_freehand/perfect_freehand.dart';
 
 class DrawingPage extends StatefulWidget {
@@ -11,61 +13,95 @@ class DrawingPage extends StatefulWidget {
 
 class _DrawingPageState extends State<DrawingPage> {
   final List<Offset> _points = [];
-  Timer? _idleTimer;
-  bool _isPointerDown = false;
+  late FocusNode _focusNode;
 
-  void _resetIdleTimer() {
-    _idleTimer?.cancel();
-    // Don't schedule clearing while the pointer is down (holding left click)
-    if (_isPointerDown) return;
-    _idleTimer = Timer(const Duration(milliseconds: 750), () {
-      if (mounted) {
-        setState(() => _points.clear());
+  final String _languageCode = 'ja';
+  late final ml.DigitalInkRecognizer _digitalInkRecognizer;
+  final ml.DigitalInkRecognizerModelManager _modelManager = ml.DigitalInkRecognizerModelManager();
+
+  @override
+  void initState() {
+    super.initState();
+    _digitalInkRecognizer = ml.DigitalInkRecognizer(languageCode: _languageCode);
+    _focusNode = FocusNode();
+    _downloadModel();
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+    });
+  }
+
+  Future<void> _downloadModel() async {
+    try {
+      final bool isDownloaded = await _modelManager.isModelDownloaded(_languageCode);
+      if (!isDownloaded) {
+        debugPrint('Downloading Japanese model...');
+        await _modelManager.downloadModel(_languageCode);
+        debugPrint('Download complete.');
       }
-    });
+    } catch (e) {
+      debugPrint('Model download error: $e');
+    }
   }
 
-  void _onPanStart(DragStartDetails details) {
-    setState(() {
-      _isPointerDown = true;
-      _points.add(details.localPosition);
-    });
-    // Ensure any pending clear is canceled while user holds down
-    _idleTimer?.cancel();
+  void _onPanStart(DragStartDetails details) => setState(() => _points.add(details.localPosition));
+  void _onPanUpdate(DragUpdateDetails details) => setState(() => _points.add(details.localPosition));
+  void _onPanEnd(DragEndDetails details) => setState(() => _points.add(Offset.zero));
+
+  void _clear() => setState(() => _points.clear());
+
+  Future<void> _checkKanji(String expectedKanji) async {
+    if (_points.isEmpty) return;
+
+    final ink = ml.Ink();
+    List<ml.StrokePoint> currentStrokePoints = [];
+
+    for (final point in _points) {
+      if (point == Offset.zero) {
+        if (currentStrokePoints.isNotEmpty) {
+          final stroke = ml.Stroke();
+          stroke.points = List.of(currentStrokePoints);
+          ink.strokes.add(stroke);
+          currentStrokePoints = [];
+        }
+      } else {
+        currentStrokePoints.add(ml.StrokePoint(
+          x: point.dx,
+          y: point.dy,
+          t: DateTime.now().millisecondsSinceEpoch,
+        ));
+      }
+    }
+
+    try {
+      final List<ml.RecognitionCandidate> candidates = await _digitalInkRecognizer.recognize(ink);
+      
+      bool isCorrect = false;
+      String detected = "nothing";
+
+      if (candidates.isNotEmpty) {
+        detected = candidates.first.text;
+        isCorrect = candidates.any((c) => 
+          c.text.contains(expectedKanji) || 
+          (expectedKanji == 'カ' && c.text.contains('力'))
+        );
+      }
+
+      _showSnackBar(isCorrect ? '✓ Correct! Detected: $detected' : '✗ Try again. Detected: $detected');
+    } catch (e) {
+      debugPrint('Recognition error: $e');
+    }
   }
 
-  void _onPanUpdate(DragUpdateDetails details) {
-    setState(() {
-      _points.add(details.localPosition);
-    });
-    // Keep the timer canceled while pointer remains down
-    _idleTimer?.cancel();
-  }
-
-  void _onPanEnd(DragEndDetails details) {
-    setState(() {
-      _isPointerDown = false;
-      // break stroke with a null marker
-      _points.add(Offset.zero);
-    });
-    _resetIdleTimer();
-  }
-
-  void _onPanCancel() {
-    setState(() {
-      _isPointerDown = false;
-    });
-    _resetIdleTimer();
-  }
-
-  void _clear() {
-    _idleTimer?.cancel();
-    setState(() => _points.clear());
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   void dispose() {
-    _idleTimer?.cancel();
+    _digitalInkRecognizer.close();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -73,17 +109,29 @@ class _DrawingPageState extends State<DrawingPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Drawing Page'),
+        title: const Text('Japanese Drawing'),
         actions: [
           IconButton(onPressed: _clear, icon: const Icon(Icons.delete)),
+          IconButton(onPressed: () => _checkKanji('カ'), icon: const Icon(Icons.check)),
         ],
       ),
-      body: GestureDetector(
-        onPanStart: _onPanStart,
-        onPanUpdate: _onPanUpdate,
-        onPanEnd: _onPanEnd,        onPanCancel: _onPanCancel,        child: CustomPaint(
-          size: Size.infinite,
-          painter: _FreehandPainter(List.of(_points)),
+      body: Focus(
+        focusNode: _focusNode,
+        onKeyEvent: (node, event) {
+          if (event.logicalKey == LogicalKeyboardKey.space && event is KeyDownEvent) {
+            _clear();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: GestureDetector(
+          onPanStart: _onPanStart,
+          onPanUpdate: _onPanUpdate,
+          onPanEnd: _onPanEnd,
+          child: CustomPaint(
+            size: Size.infinite,
+            painter: _FreehandPainter(List.of(_points)),
+          ),
         ),
       ),
     );
@@ -157,7 +205,7 @@ class _FreehandPainter extends CustomPainter {
         // finish
         path.lineTo(stroke.last.dx, stroke.last.dy);
         final strokePaint = Paint()
-          ..color = Colors.black
+          ..color = const Color.fromARGB(255, 0, 0, 0)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 4.0
           ..strokeCap = StrokeCap.round
